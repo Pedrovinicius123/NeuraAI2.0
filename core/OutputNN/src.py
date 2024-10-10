@@ -19,10 +19,9 @@ class OutputModel:
         self.W_output = np.random.randn(self.n_neurons_hidden, self.n_neurons_output)
         self.B_output = np.ones((1, self.n_neurons_output))
 
-    def forward(self, x:np.array):
-        # Forward feeding processing
-        self.x_ = x        
-        self.x1 = x.dot(self.W_input) + self.B_input
+    def forward(self):
+        # Forward feeding processing       
+        self.x1 = self.x_.dot(self.W_input) + self.B_input
         self.activation = expit(self.x1)
         output = self.activation.dot(self.W_output) + self.B_output
 
