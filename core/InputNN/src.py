@@ -1,8 +1,8 @@
 import numpy as np
-import time
+import time, threading
 from scipy.special import expit
 
-class InputModel:
+class InputModel(threading.Thread):
     def __init__(self, n_neurons_hidden:int, n_neurons_output:int, learning_rate:float, x_:np.ndarray):
         # Setting x_ variable
         self.x_ = x_
@@ -18,26 +18,25 @@ class InputModel:
         
         self.W_output = np.random.randn(self.n_neurons_hidden, self.n_neurons_output)
         self.B_output = np.ones((1, self.n_neurons_output))
+        self.event = threading.Event()
+        self.output_exp = None
+
+        threading.Thread.__init__(self)
 
     def forward(self, x:np.array):
-        # Forward feeding processing      
+        # Forward feeding processing
+
         self.x1 = x.dot(self.W_input) + self.B_input
         self.activation = expit(self.x1)
         self.output = self.activation.dot(self.W_output) + self.B_output
 
-        return expit(self.output)
+        self.output_exp = expit(self.output)
 
     def sigmoidal_deriv(self, x):
         return expit(x) * (1-expit(x))
     
-    def backpropagation(self, delta:list, W_ant:list, output_inner:list):
-        delta = np.array(delta)
-        W_ant = np.array(W_ant)
-        output_inner = np.array(output_inner)
-
-        self.forward(self.x_)
-
-        delta_prog = delta.dot(W_ant.T)*self.sigmoidal_deriv(output_inner)
+    def backpropagation(self, delta:np.ndarray, W_ant:np.ndarray):
+        delta_prog = delta.dot(W_ant.T)*self.sigmoidal_deriv(self.output_exp)
         
         dWn = self.learning_rate*(self.activation.T).dot(delta_prog)
         dBn = self.learning_rate*np.sum(delta_prog, axis=0, keepdims=True)
@@ -53,3 +52,14 @@ class InputModel:
         W_anterior = np.copy(self.W_input)
         self.W_input -= dWn
         self.B_input -= dBn
+
+    def run(self):
+        self.forward(self.x_)
+        
+
+    def join(self, stop, *args):
+        if stop:
+            threading.Thread.join(self, *args)
+            
+        else:
+            return self.output_exp

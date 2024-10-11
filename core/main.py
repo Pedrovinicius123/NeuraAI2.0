@@ -1,5 +1,5 @@
 import numpy as np
-import joblib
+import joblib, time, threading
 
 from sklearn.datasets import make_moons, make_blobs, load_iris
 from sklearn.model_selection import train_test_split
@@ -7,6 +7,7 @@ from scipy.special import expit
 from InputNN.src import InputModel
 from OutputNN.src import OutputModel
 
+event = threading.Event()
 
 class ModularNN:
     def __init__(self, x_:np.ndarray, y_:np.ndarray, n_input_models:int, learning_rate:float, std_n_neurons_hidden:int, std_output_inner:int, output_shape:int):
@@ -22,6 +23,8 @@ class ModularNN:
 
         """
 
+        np.random.seed(3)
+
         # Initializing important variables        
         self.n_input_models = n_input_models
         self.learning_rate = learning_rate
@@ -30,7 +33,7 @@ class ModularNN:
 
         # Initialize x y variables
         self.x_ = x_
-        self.y_ = y_.reshape(-1, 1)
+        self.y_ = y_
         self.output_shape = output_shape
 
         self.inner_W = np.random.randn(std_output_inner, std_output_inner)
@@ -46,25 +49,33 @@ class ModularNN:
     def sigmoidal_deriv(self, x:np.ndarray):
         return expit(x) * (1-expit(x))
 
-    def forward(self, x:np.ndarray):
+    def forward(self, x:np.ndarray, first_time:bool=True):
         # Estabilishing parallel working
-        with joblib.Parallel(n_jobs=self.n_input_models) as parallel:
-            delayed_funcs = [joblib.delayed(lambda f: f.forward(x))(model) for model in self.models]
-            results = parallel(delayed_funcs)
+        threads = []
+        
+        for model in self.models:
+            model.start() if first_time else model.run()            
+            threads.append(model)
 
-        self.output_inner = np.sum(results, axis=0)
-        self.activ = self.output_inner.dot(self.inner_W) + self.inner_B
+        results = []
+        time.sleep(0.1)
+
+        for thread in threads:
+            output_exp = thread.join(False)
+            results.append(output_exp)
+
+        self.output_inner = np.sum(results, axis=0, keepdims=True)
+        self.activ = self.output_inner[0].dot(self.inner_W) + self.inner_B
         self.output_model.x_ = expit(self.activ)
         pred = self.output_model.forward()
 
         return pred
 
-    def backpropagation(self):
+    def backpropagation(self, result):
         # First iteration
-        softmax = self.forward(self.x_)
 
-        delta_n = np.copy(softmax)
-        delta_n[range(self.x_.shape[0]-1), self.y_] -= 1
+        delta_n = np.copy(result)
+        delta_n[range(self.x_.shape[0]), self.y_] -= 1
 
         dWn = self.learning_rate*(self.output_model.activation.T).dot(delta_n)
         dBn = self.learning_rate*np.sum(delta_n, axis=0, keepdims=True)
@@ -96,30 +107,45 @@ class ModularNN:
         self.inner_B -= dBn
 
         # Last iteration
-        with joblib.Parallel(n_jobs=self.n_input_models, prefer="threads") as parallel:
-            delayed_funcs = [joblib.delayed(lambda x: x.backpropagation(delta_prog.tolist(), W_ant.tolist(), self.output_inner.tolist()))(model) for model in self.models]
-            parallel(delayed_funcs)
-
-        return softmax
+        for model in self.models:
+            model.backpropagation(delta_prog, W_ant)
 
     def fit(self, epochs:int=100):
         correct = 0
+        first_time = True
+
+        for model in self.models:
+            if model.is_alive():
+                model.join(stop=True)
 
         for epoch in range(epochs):
-            outputs = self.backpropagation()
-            prediction = np.argmax(outputs, axis=0)
-            correct = (prediction == self.y_).sum()
+            outputs = self.forward(self.x_, first_time=first_time)
+            self.backpropagation(outputs)
+            prediction = np.argmax(outputs, axis=1)
+            correct = (prediction == self.y_.reshape(-1)).sum()
             accuracy = correct/self.y_.shape[0]
 
-            if (epoch-1)%10 == 0:
-                print(f"Epoch: {epoch}/{epochs}, Accuracy: {accuracy}")
+            print(f"Epoch: {epoch}/{epochs}, Accuracy: {accuracy}")
+
+            if accuracy >= 0.93:
+                return prediction
+
+
+            if epoch == epochs-1:
+                for model in self.models:
+                    model.join(stop=True)
+
+            first_time=False
 
         return prediction
         
 
 
 if __name__ == "__main__":
-    X, y = make_moons(n_samples=400, random_state=3, noise=1.5)
-    
-    brain = ModularNN(x_=X, y_=y, n_input_models=5, learning_rate=0.001, std_n_neurons_hidden=10, std_output_inner=4, output_shape=2)
-    result = brain.fit()
+    X, y = make_blobs(n_samples=400, n_features=5, random_state=3, cluster_std=1.5, centers=5)
+    y_new = []
+    y = y.reshape(-1)
+
+    brain = ModularNN(x_=X, y_=y, n_input_models=10, learning_rate=0.0001, std_n_neurons_hidden=100, std_output_inner=10, output_shape=5)
+    result = brain.fit(1000)
+    print(result)
