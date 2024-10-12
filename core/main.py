@@ -3,6 +3,7 @@ import joblib, time, threading
 
 from sklearn.datasets import make_moons, make_blobs, load_iris
 from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score
 from scipy.special import expit
 from InputNN.src import InputModel
 from OutputNN.src import OutputModel
@@ -110,7 +111,17 @@ class ModularNN:
         for model in self.models:
             model.backpropagation(delta_prog, W_ant)
 
-    def fit(self, epochs:int=100):
+    def loss(self, softmax):
+        # Cross Entropy
+        pred = np.zeros(self.y_.shape[0])
+        for i, correct_index in enumerate(self.y_):
+            predicted = softmax[i][correct_index]
+            pred[i] = predicted
+
+        log_prob = -np.log(predicted)
+        return log_prob/self.y_.shape[0]
+
+    def fit(self):
         correct = 0
         first_time = True
 
@@ -118,34 +129,33 @@ class ModularNN:
             if model.is_alive():
                 model.join(stop=True)
 
-        for epoch in range(epochs):
+        epoch = 0
+        while True:
             outputs = self.forward(self.x_, first_time=first_time)
+            loss = self.loss(outputs)
             self.backpropagation(outputs)
             prediction = np.argmax(outputs, axis=1)
             correct = (prediction == self.y_.reshape(-1)).sum()
             accuracy = correct/self.y_.shape[0]
+            
+            if epoch%10 == 0: 
+                print(f"Epoch: {epoch}, Accuracy: {accuracy}, loss: {loss}")
 
-            print(f"Epoch: {epoch}/{epochs}, Accuracy: {accuracy}")
-
-            if accuracy >= 0.93:
-                return prediction
-
-
-            if epoch == epochs-1:
+            if accuracy >= 0.99:
+                print(correct, accuracy)
                 for model in self.models:
                     model.join(stop=True)
 
+                return prediction
+
             first_time=False
+            epoch += 1
 
         return prediction
+    
+    def predict(self, x:np.ndarray):
+        for model in self.models:
+            model.x_ = x
+
+        return self.forward(x, first_time=False)
         
-
-
-if __name__ == "__main__":
-    X, y = make_blobs(n_samples=400, n_features=5, random_state=3, cluster_std=1.5, centers=5)
-    y_new = []
-    y = y.reshape(-1)
-
-    brain = ModularNN(x_=X, y_=y, n_input_models=10, learning_rate=0.0001, std_n_neurons_hidden=100, std_output_inner=10, output_shape=5)
-    result = brain.fit(1000)
-    print(result)
